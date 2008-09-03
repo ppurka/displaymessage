@@ -1,0 +1,276 @@
+#!/bin/bash
+
+##+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++##
+#   This program is a wrapper for xmessage,gxmessage,Xdialog or kdialog   #
+#           The script is very stable, and should not break               #
+#                                           -ppurka                       #
+##-----------------------------------------------------------------------##
+
+##++++++++++++++++++++++++    Changelog   +++++++++++++++++++++++++++++++##
+# 11/20/2007    Synced with the desktop and added comments from desktop   #
+#               Changed version to 0.91 from 0.9                          #
+#               Corrected a bug in output of checked list from kdialog    #
+# ~10/2007      Added warningyesno, error, sorry and switched over to     #
+#               kdialog as the default since it has better display        #
+#               Added a workaround for kdialog when it does not recognize #
+#               \n within the text                                        #
+# <10/1/2007    Umpteen number of untracked changes                       #
+#               Added an arbitrary version 0.9 !                          #
+##-----------------------------------------------------------------------##
+
+. `which my_bash_functions 2> /dev/null` || {
+    echo -e " \x1b[1;31mError!\x1b[0m The script \x1b[1;32mmy_bash_functions\
+\x1b[0m was not found in your \$PATH
+        Please ensure that the script is available and executable"
+    exit 1
+}
+
+# Help me!! {{{
+help() {
+    echo;
+    echo -e "  $yellow $( basename ${0} ):$normal";
+    info "This program is a wrapper for xmessage/gxmessage/Xdialog/kdialog
+    The order of selection is Xdialog, kdialog, gxmessage, and finally
+    xmessage if none of the previous one is found in \$PATH."
+    info "Usage:     $( basename ${0} ) [<options>]";
+    info "Options:
+    -h | --help         This help text
+    --center            Center the window
+    --title <title>     Set the title of the window
+    --yesno <txt>       Provide a Yes/No type of dialog
+    --warningyesno <txt>   Provide a Yes/No type of dialog (only for kdialog)
+    --msgbox <txt>      Provide a message box
+    --error <txt>       Provide a message box with error icon (only kdialog)
+    --sorry <txt>       Provide a message box with sorry icon (only kdialog)
+    --menu <txt> <tag1 description1> ...              Provide a menu of options
+    --checklist <txt> <tag1 description1 status1> ... Provide a checklist
+                        ${bold}Available only for Xdialog/kdialog${normal}
+    --radiolist <txt> <tag1 description1 status> ...  Provide a radiolist
+    --passive <txt> [<N sec>]                         Provide a passive box,
+                        which closes after N secs. (default 10sec)
+    --savefile <startdir> <filter>  Provide a file selection dialog
+                        ${bold}Not available for xmessage${normal}"
+    echo;
+}
+# }}}
+
+DIALOG="kdialog Xdialog gxmessage xmessage"; # In order of preference
+#DIALOG=kdialog
+
+selectdialog() { # {{{
+    for i in ${DIALOG}; do
+        if which $i >& /dev/null; then
+            DIALOG=`which $i`; return 0;
+        fi
+    done
+    return 1;
+}
+# }}}
+
+# displaymsg: # {{{
+# Options: 
+#   --center        Center the window
+#   --title <title> Set the title of the window
+#   --yesno <txt>   Provide a Yes/No type of dialog
+#   --warningyesno <txt>   Provide a Yes/No type of dialog (only for kdialog)
+#   --msgbox <txt>  Provide a message box
+#   --error <txt>  Provide a message box with error icon (only for kdialog)
+#   --sorry <txt>  Provide a message box with sorry icon (only for kdialog)
+#   --menu <txt> <tag1 description1> ...  Provide a menu of options
+#   --checklist <txt> <tag1 description1 status1> ... Provide a checklist
+#   --radiolist <txt> <tag1 description1 status> ... Provide a radiolist
+#   --passive <txt> [<N sec>]   Provide a passive box, which closes after N secs.
+#   --savefile <startdir> <filter>  Provide a file selection dialog 
+displaymsg() { 
+    local TMP_FILE=`mktemp` || die "Can not create temporary file";
+    local DIALOG_BUTTON_COUNT=0;# No of buttons (g)xmessage has
+    local DIALOG_BUTTONS=;      # Actual buttons of (g)xmessage
+    local DIALOG_TEXT=;         # The main text for [Xk]dialog
+    local DIALOG_TITLE=;        # The command for the title of $DIALOG
+    local DIALOG_CENTER=;       # Holds the command for centering $DIALOG 
+    local DIALOG_TIMEOUT=10;    # Timeout for passive dialogs
+    DIALOG_RETURN_PRINT=;       # The text returned by $DIALOG
+    DIALOG_RETURN_STATUS=-1;    # The return status of $DIALOG
+
+    until [[ -z "$1" ]]; do
+    case "$1" in
+    --center)   case ${DIALOG##*\/} in
+                *message)   DIALOG_CENTER="-center";;
+                Xdialog)    DIALOG_CENTER="--center";;
+                kdialog)    ;;
+                esac ;;
+    --title) shift; case ${DIALOG##*\/} in
+            xmessage)   ;;
+            gxmessage)  DIALOG_TITLE="-title \"$1\"";;
+            *)  DIALOG_TITLE="--title \"$1\"";;
+            esac ;;
+
+    --yesno|--warningyesno)     D1="$1"; shift; case ${DIALOG##*\/} in
+            *xmessage)  echo -e "$1" >> $TMP_FILE
+                DIALOG_BUTTONS="-buttons \"Yes\":0,\"No\":1 -default \"Yes\"";
+                DIALOG_BUTTON_COUNT=2; ;;
+            kdialog)    DIALOG_TEXT="$D1 \"$1\""; ;;
+            Xdialog)    DIALOG_TEXT="--yesno \"$1\" 0x0"; ;;
+            esac ;;
+
+    --sorry|--msgbox|--error)   D1="$1"; shift; case ${DIALOG##*\/} in
+            *xmessage)  echo -e "$1" >> $TMP_FILE
+                DIALOG_BUTTONS="-buttons \"Ok\":1 -default \"Ok\"";
+                DIALOG_BUTTON_COUNT=1; ;;
+            kdialog)    DIALOG_TEXT="$D1 \"$1\""; ;;
+            Xdialog)    DIALOG_TEXT="--msgbox \"$1\" 0x0"; ;;
+            esac ;;
+
+    --menu) shift; case ${DIALOG##*\/} in # {{{
+            *xmessage)  echo -e "$1\n" >> $TMP_FILE;
+                DIALOG_BUTTONS="-buttons ";
+                DIALOG_BUTTON_COUNT=2; ;;# At least one menu item + Cancel
+            kdialog)    DIALOG_TEXT="--menu \"$1\""; ;;
+            Xdialog)    DIALOG_TEXT="--menu \"$1\" 0x0"; ;;
+            esac; shift;
+            until [[ -z "$1" ]]; do case ${DIALOG##*\/} in
+              *xmessage) echo -e "$1: $2" >> $TMP_FILE
+                DIALOG_BUTTONS="${DIALOG_BUTTONS}\"$1\":$DIALOG_BUTTON_COUNT,"
+                DIALOG_BUTTON_COUNT="$(( $DIALOG_BUTTON_COUNT + 1 ))" ;;
+              kdialog)  DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\""; ;;
+              Xdialog)  DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\""; 
+                DIALOG_BUTTON_COUNT="$(( $DIALOG_BUTTON_COUNT + 1 ))" ;;
+              esac
+              # Check for --option in command line
+              if echo "$3" | grep -q -s "^--"; then shift; break;
+              else shift; shift; fi;
+            done 
+            case ${DIALOG##*\/} in
+            *xmessage)  DIALOG_BUTTONS="${DIALOG_BUTTONS}\"Cancel\":1 -default \"Cancel\" -print" ;;
+            kdialog)    ;;
+            Xdialog)    DIALOG_BUTTON_COUNT="$(( $DIALOG_BUTTON_COUNT + 1))";
+                DIALOG_BUTTONS="$DIALOG_BUTTON_COUNT ${DIALOG_BUTTONS}" ;;
+            esac ;; # }}}
+
+    --checklist) shift; case ${DIALOG##*\/} in # {{{
+            *xmessage)  displaymsg --msgbox "Error! --checklist option is available only for Xdialog/kdialog";
+                rm -f $TMP_FILE
+                die "--checklist option is available only for Xdialog/kdialog" ;;
+            kdialog)    DIALOG_TEXT="--checklist \"$1\"" ;;
+            Xdialog)    DIALOG_TEXT="--checklist \"$1\" 0x0" ;;
+            esac; shift;
+            until [[ -z "$1" ]]; do case ${DIALOG##*\/} in
+              kdialog) DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\" \"$3\"";;
+              Xdialog) DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\" \"$3\"";
+                DIALOG_BUTTON_COUNT="$(( $DIALOG_BUTTON_COUNT + 1 ))" ;;
+              esac
+              # Check for --option in command line
+              if echo "$4" | grep -q -s "^--"; then shift; shift; break;
+              else shift; shift; shift; fi
+            done
+            case ${DIALOG##*\/} in
+            kdialog)    ;;
+            Xdialog)    DIALOG_BUTTON_COUNT="$(( $DIALOG_BUTTON_COUNT + 1))";
+                DIALOG_BUTTONS="$DIALOG_BUTTON_COUNT ${DIALOG_BUTTONS}" ;;
+            esac ;; # }}}
+
+    --radiolist) [[ "${DIALOG/xmessage/}" != "${DIALOG}" ]] && local DEFAULT_CANCEL="Cancel";  ## Need this to set the default radiolist item {{{
+            shift; case ${DIALOG##*\/} in
+            *xmessage)  echo -e "$1\n" >> $TMP_FILE;
+                DIALOG_BUTTONS="-buttons ";
+                DIALOG_BUTTON_COUNT=2; ;;# At least one menu item + Cancel
+            kdialog)    DIALOG_TEXT="--radiolist \"$1\""; ;;
+            Xdialog)    DIALOG_TEXT="--radiolist \"$1\" 0x0"; ;;
+            esac; shift;
+            until [[ -z "$1" ]]; do case ${DIALOG##*\/} in
+              *xmessage) echo -e "$1: $2" >> $TMP_FILE
+                DIALOG_BUTTONS="${DIALOG_BUTTONS}\"$1\":$DIALOG_BUTTON_COUNT,"
+                DIALOG_BUTTON_COUNT="$(( $DIALOG_BUTTON_COUNT + 1 ))" ;;
+              kdialog)  DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\" \"$3\""; ;;
+              Xdialog)  DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\" \"$3\""; 
+                DIALOG_BUTTON_COUNT="$(( $DIALOG_BUTTON_COUNT + 1 ))" ;;
+              esac
+              if echo $3 | grep -q -s -i "on"; then DEFAULT_CANCEL="$1"; fi
+              # Check for --option in command line
+              if echo "$4" | grep -q -s "^--"; then shift; shift; break;
+              else shift; shift; shift; fi
+            done 
+            case ${DIALOG##*\/} in
+            *xmessage)  DIALOG_BUTTONS="${DIALOG_BUTTONS}\"Cancel\":1 -default \"$DEFAULT_CANCEL\" -print" ;;
+            kdialog)    ;;
+            Xdialog)    DIALOG_BUTTON_COUNT="$(( $DIALOG_BUTTON_COUNT + 1))";
+                DIALOG_BUTTONS="$DIALOG_BUTTON_COUNT ${DIALOG_BUTTONS}" ;;
+            esac ;; # }}}
+
+    --passive) shift; case ${DIALOG##*\/} in # {{{
+            *xmessage)   echo -e "$1" >> $TMP_FILE;
+                DIALOG_BUTTONS="-buttons \"Ok\":1 -default \"Ok\"";
+                DIALOG_BUTTON_COUNT=1;
+                if !( echo "$2" | grep -q -s "[[:alpha:]]") && [[ "$2" -gt 0 ]]; then DIALOG_TIMEOUT=$2; shift; fi
+                DIALOG_BUTTONS="$DIALOG_BUTTONS -timeout $DIALOG_TIMEOUT"; ;;
+            kdialog)    DIALOG_TEXT="--passivepopup \"$1\"";
+                if !( echo "$2" | grep -q -s "[[:alpha:]]") && [[ "$2" -gt 0 ]]; then DIALOG_TIMEOUT=$2; shift; fi
+                DIALOG_TEXT="$DIALOG_TEXT $DIALOG_TIMEOUT"; ;;
+            Xdialog)    DIALOG_TEXT="--infobox \"$1\" 0x0";
+                if !( echo "$2" | grep -q -s "[[:alpha:]]") && [[ "$2" -gt 0 ]]; then DIALOG_TIMEOUT=$2; shift; fi
+                DIALOG_TEXT="$DIALOG_TEXT $(( $DIALOG_TIMEOUT*1000 ))"; ;;
+            esac ;; # }}}
+
+    --savefile) # for xmessage, open a small xterm # {{{
+            shift; case ${DIALOG##*\/} in
+            xmessage)   # Use default.. can't implement it at present
+                # However, the xterm command is like this:
+                # xterm -xrm '*VT100*translations: #override \n\
+                # <Key>Escape: string("^C\n") string("exit\n")\n'
+                # What I don't know is how to take input from that term.
+                displaymsg --msgbox "Error! File selection is not yet implemented in xmessage"
+                rm -f $TMP_FILE
+                die "File selection is not yet implemented in xmessage" ;;
+            gxmessage)  echo -e "Enter the full path name of the file" > $TMP_FILE
+                DIALOG_TEXT="-title \"Select file\" -entrytext \"$1/$2\"" 
+                DIALOG_BUTTON_COUNT=1 ;;
+            kdialog)    DIALOG_TEXT="--title \"Select file\" --getsavefilename \"$1\" \"$2\"" ;;
+            Xdialog)    DIALOG_TEXT="--title \"Select file\" --fselect \"$1/$2\" 0x0";;
+            esac
+            shift ;; # }}}
+
+    *)  Err "$1: Not yet implemented"; rm -f $TMP_FILE; exit 1; ;;
+    esac
+    shift; 
+    done
+            
+    # Show the dialog
+#    info "$DIALOG $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS"
+    case ${DIALOG##*\/} in
+    Xdialog)    DIALOG_RETURN_PRINT=`eval "$DIALOG --stdout $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS"` ;;
+    kdialog)  DIALOG_RETURN_PRINT=`eval "$DIALOG $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS"`;;
+    gxmessage) DIALOG_RETURN_PRINT=`eval "$DIALOG -wrap $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS -file $TMP_FILE"`;;
+    xmessage) DIALOG_RETURN_PRINT=`eval "$DIALOG $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS -file $TMP_FILE"`;;
+    esac
+    DIALOG_RETURN_STATUS=$? ;
+    rm -f $TMP_FILE
+}
+# }}}
+
+
+# Some error checking -- Don't even bother parsing command line
+if [[ -z "$DISPLAY" ]] && ! (xhost &> /dev/null); then die "This program is designed to be run in a graphical environment"; fi
+
+if [[ -z "$1" || "$1" = "-h" || "$1" = "--help" ]]; then
+    help; exit;
+fi
+
+# Some error checking
+if ! selectdialog; then die "No graphical message display program available"; fi
+#echo $DIALOG
+
+# Workaround for kdialog, which does not recognize \n at times
+if [[ $DIALOG = "*kdialog" ]]; then
+    displaymsg "${@[@]/\\n/\n }"
+else
+    displaymsg "$@"
+fi
+
+# Hack to make the return of checklist for *dialog to be compatible
+if [[ "${@/--checklist/}" != "$@" && "${DIALOG##*\/}" = "kdialog" ]]; then
+    DIALOG_RETURN_PRINT="${DIALOG_RETURN_PRINT[@]//\" \"//}";
+    DIALOG_RETURN_PRINT="${DIALOG_RETURN_PRINT[@]//\"/}";
+fi
+
+echo "$DIALOG_RETURN_PRINT"
+exit $DIALOG_RETURN_STATUS
