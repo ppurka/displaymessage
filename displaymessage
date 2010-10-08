@@ -56,7 +56,7 @@ help() {
 }
 # }}}
 
-DIALOG="kdialog Xdialog gxmessage xmessage" # In order of preference
+: ${DIALOG:="kdialog Xdialog gxmessage xmessage"} # In order of preference
 #DIALOG=kdialog
 
 selectdialog() { # {{{
