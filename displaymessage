@@ -7,6 +7,7 @@
     ##-------------------------------------------------------------------##
 
     ##++++++++++++++++++++++++    Changelog   +++++++++++++++++++++++++++##
+    # 12/26/2010    Use dialog --print-maxsize to get max terminal size   #
     # 09/13/2010    Add support for dialog in case X is not available     #
     #               Some cleanups and bashisms                            #
     # 11/20/2007    Synced with desktop and added comments from desktop   #
@@ -62,9 +63,11 @@ help() {
 selectdialog() { # {{{
     if [[ -z "$DISPLAY" ]]; then
         DIALOG="$( which dialog )" || return 1
+        local out="$( dialog --stdout --print-maxsize )"
+        out="${out#*: }"; out="${out/\,}"
         # Leave some space on all sides
-        rows=$(( $( tput lines ) - 10 ))
-        cols=$(( $( tput cols ) - 10 ))
+        rows="${out% *}"
+        cols="${out#* }"
         return 0
     fi
     for i in ${DIALOG}; do
