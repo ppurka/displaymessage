@@ -7,6 +7,7 @@
     ##-------------------------------------------------------------------##
 
     ##++++++++++++++++++++++++    Changelog   +++++++++++++++++++++++++++##
+    # 08/12/2011    Make sure xmessage returns status 0 for lists         #
     # 12/26/2010    Use dialog --print-maxsize to get max terminal size   #
     # 09/13/2010    Add support for dialog in case X is not available     #
     #               Some cleanups and bashisms                            #
@@ -303,7 +304,11 @@ Xdialog/kdialog/dialog" ;;
     gxmessage) DIALOG_RETURN_PRINT="$( eval "$DIALOG -wrap $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS -file $TMP_FILE" )";;
     xmessage) DIALOG_RETURN_PRINT="$( eval "$DIALOG $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS -file $TMP_FILE" )";;
     esac
-    DIALOG_RETURN_STATUS=$? ;
+    DIALOG_RETURN_STATUS=$?
+    # Fix for xmessage. It returns the button count. Since Cancel==1, we
+    # ignore the return status for all the other buttons.
+    [[ "${DIALOG##*/}" = "xmessage" && $DIALOG_RETURN_STATUS -gt 1 ]] && \
+        DIALOG_RETURN_STATUS=0
     rm -f $TMP_FILE
 }
 # }}}
