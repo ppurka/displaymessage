@@ -7,6 +7,7 @@
     ##-------------------------------------------------------------------##
 
     ##++++++++++++++++++++++++    Changelog   +++++++++++++++++++++++++++##
+    # 09/03/2011    Bugfix: Provide smaller $rows and $cols to dialog     #
     # 08/12/2011    Make sure xmessage returns status 0 for lists         #
     # 12/26/2010    Use dialog --print-maxsize to get max terminal size   #
     # 09/13/2010    Add support for dialog in case X is not available     #
@@ -67,8 +68,8 @@ selectdialog() { # {{{
         local out="$( dialog --stdout --print-maxsize )"
         out="${out#*: }"; out="${out/\,}"
         # Leave some space on all sides
-        rows="${out% *}"
-        cols="${out#* }"
+        rows="$(( ${out% *} - 10 ))"
+        cols="$(( ${out#* } - 10 ))"
         return 0
     fi
     for i in ${DIALOG}; do
