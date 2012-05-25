@@ -7,6 +7,7 @@
     ##-------------------------------------------------------------------##
 
     ##++++++++++++++++++++++++    Changelog   +++++++++++++++++++++++++++##
+    # 25/05/2012    Add support for zenity.                               #
     # 09/03/2011    Bugfix: Provide smaller $rows and $cols to dialog     #
     # 08/12/2011    Make sure xmessage returns status 0 for lists         #
     # 12/26/2010    Use dialog --print-maxsize to get max terminal size   #
@@ -22,6 +23,9 @@
     # <10/1/2007    Umpteen number of untracked changes                   #
     #               Added an arbitrary version 0.9 !                      #
     ##-------------------------------------------------------------------##
+
+    #------------------------        TODO       --------------------------#
+    # 1. Use arrays and not the dumb strings                              #
 
 . `which my_bash_functions 2> /dev/null` || {
     echo -e " \x1b[1;31mError!\x1b[0m The script \x1b[1;32mmy_bash_functions\
@@ -59,7 +63,7 @@ help() {
 }
 # }}}
 
-: ${DIALOG:="kdialog Xdialog gxmessage xmessage"} # In order of preference
+: ${DIALOG:="kdialog zenity Xdialog gxmessage xmessage"} # In order of preference
 #DIALOG=kdialog
 
 selectdialog() { # {{{
@@ -103,6 +107,7 @@ displaymsg() {  # {{{
     local DIALOG_TITLE=         # The command for the title of $DIALOG
     local DIALOG_CENTER=        # Holds the command for centering $DIALOG 
     local DIALOG_TIMEOUT=10     # Timeout for passive dialogs
+    local ZENITY_LIST=0         # Set it to 1 when zenity is used with lists
     DIALOG_RETURN_PRINT=        # The text returned by $DIALOG
     DIALOG_RETURN_STATUS=-1     # The return status of $DIALOG
 
@@ -118,6 +123,7 @@ displaymsg() {  # {{{
         case ${DIALOG##*\/} in
             xmessage)   ;;
             gxmessage)  DIALOG_TITLE="-title \"$1\"";;
+            zenity)     DIALOG_TITLE="--title=\"$1\"";;
             *)          DIALOG_TITLE="--title \"$1\"";;
         esac ;;
 
@@ -130,6 +136,7 @@ displaymsg() {  # {{{
             kdialog)    DIALOG_TEXT="$D1 \"$1\"" ;;
             Xdialog)    DIALOG_TEXT="--yesno \"$1\" 0x0" ;;
             dialog)     DIALOG_TEXT="--yesno \"$1\" $rows $cols" ;;
+            zenity)     DIALOG_TEXT="--question --text=\"$1\"" ;;
         esac ;;
 
     --sorry|--msgbox|--error) D1="$1"
@@ -141,9 +148,12 @@ displaymsg() {  # {{{
             kdialog)    DIALOG_TEXT="$D1 \"$1\"" ;;
             Xdialog)    DIALOG_TEXT="--msgbox \"$1\" 0x0" ;;
             dialog)     DIALOG_TEXT="--msgbox \"$1\" $rows $cols" ;;
+            zenity)     [[ "$1" = "--error" ]] || D1="--info"
+                        DIALOG_TEXT="$D1 --text=\"$1\"" ;;
         esac ;;
 
     --menu) shift # {{{
+        # We have to fake a menu for zenity by using radiolist
         case ${DIALOG##*\/} in
             *xmessage)  echo -e "$1\n" >> $TMP_FILE;
                 DIALOG_BUTTONS="-buttons ";
@@ -151,6 +161,8 @@ displaymsg() {  # {{{
             kdialog)    DIALOG_TEXT="--menu \"$1\"" ;;
             Xdialog)    DIALOG_TEXT="--menu \"$1\" 0x0" ;;
             dialog)     DIALOG_TEXT="--menu \"$1\" $rows $cols $(( $rows - 4 ))" ;;
+            zenity)     DIALOG_TEXT="--list --text=\"$1\" --column=\"Choose an option\""
+                ZENITY_LIST=1 ;;
         esac
         shift
         until [[ -z "$1" ]]; do
@@ -161,6 +173,8 @@ displaymsg() {  # {{{
               Xdialog)  DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\"" 
                 ((DIALOG_BUTTON_COUNT++)) ;;
               *dialog)  DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\"" ;;
+              zenity)   DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$2\""
+                        ZENITY_TAGS["$2"]="$1";;
             esac
             # Check for --option in command line
             if echo "$3" | grep -q -s "^--"; then
@@ -176,6 +190,7 @@ displaymsg() {  # {{{
             Xdialog)    ((DIALOG_BUTTON_COUNT++))
                 DIALOG_BUTTONS="$DIALOG_BUTTON_COUNT ${DIALOG_BUTTONS}" ;;
             *dialog)    ;;
+            zenity)     ;;
         esac ;; # }}}
 
     --checklist) shift # {{{
@@ -188,6 +203,8 @@ Xdialog/kdialog/dialog" ;;
             kdialog)    DIALOG_TEXT="--checklist \"$1\"" ;;
             Xdialog)    DIALOG_TEXT="--checklist \"$1\" 0x0" ;;
             dialog)     DIALOG_TEXT="--checklist \"$1\" $rows $cols $(( $rows - 4 ))" ;;
+            zenity)     DIALOG_TEXT="--list --checklist --text=\"$1\" --column='' --column=\"Choose your options\""
+                ZENITY_LIST=1;;
         esac
         shift
         until [[ -z "$1" ]]; do
@@ -195,6 +212,12 @@ Xdialog/kdialog/dialog" ;;
                 Xdialog) DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\" \"$3\""
                     ((DIALOG_BUTTON_COUNT++)) ;;
                 *dialog) DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\" \"$3\"";;
+                zenity)  case "$3" in
+                            [oO][nN])       DIALOG_BUTTONS+=" TRUE" ;;
+                            [oO][fF][fF])   DIALOG_BUTTONS+=" FALSE" ;;
+                        esac
+                    DIALOG_BUTTONS+=" \"$2\""
+                    ZENITY_TAGS["$2"]="$1" ;;
             esac
             # Check for --option in command line
             if echo "$4" | grep -q -s "^--"; then
@@ -223,6 +246,8 @@ Xdialog/kdialog/dialog" ;;
             kdialog)    DIALOG_TEXT="--radiolist \"$1\"" ;;
             Xdialog)    DIALOG_TEXT="--radiolist \"$1\" 0x0" ;;
             dialog)     DIALOG_TEXT="--radiolist \"$1\" $rows $cols $(( $rows - 4 ))" ;;
+            zenity)     DIALOG_TEXT="--list --radiolist --text=\"$1\" --column='' --column=\"Choose your options\""
+                ZENITY_LIST=1;;
         esac
         shift
         until [[ -z "$1" ]]; do
@@ -233,6 +258,12 @@ Xdialog/kdialog/dialog" ;;
               Xdialog)  DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\" \"$3\"" 
                 ((DIALOG_BUTTON_COUNT++)) ;;
               *dialog)  DIALOG_BUTTONS="${DIALOG_BUTTONS} \"$1\" \"$2\" \"$3\"" ;;
+                zenity)  case "$3" in
+                            [oO][nN])       DIALOG_BUTTONS+=" TRUE" ;;
+                            [oO][fF][fF])   DIALOG_BUTTONS+=" FALSE" ;;
+                        esac
+                    DIALOG_BUTTONS+=" \"$2\""
+                    ZENITY_TAGS["$2"]="$1" ;;
             esac
             if echo $3 | grep -q -s -i "on"; then
                 DEFAULT_CANCEL="$1"
@@ -253,6 +284,7 @@ Xdialog/kdialog/dialog" ;;
             Xdialog)    ((DIALOG_BUTTON_COUNT++))
                 DIALOG_BUTTONS="$DIALOG_BUTTON_COUNT ${DIALOG_BUTTONS}" ;;
             *dialog)    ;;
+            zenity)     ;;
         esac ;; # }}}
 
     --passive) shift # {{{
@@ -267,6 +299,7 @@ Xdialog/kdialog/dialog" ;;
             dialog)     DIALOG_TEXT="--pause \"$1\" $rows $cols $DIALOG_TIMEOUT" ;;
             kdialog)    DIALOG_TEXT="--passivepopup \"$1\" $DIALOG_TIMEOUT" ;;
             Xdialog)    DIALOG_TEXT="--infobox \"$1\" 0x0 $(( $DIALOG_TIMEOUT*1000 ))" ;;
+            zenity)    DIALOG_TEXT="--notification --text=\"$1\"" ;;
         esac
         shift ;; # }}}
 
@@ -287,6 +320,7 @@ Xdialog/kdialog/dialog" ;;
             kdialog)    DIALOG_TEXT="--title \"Select file\" --getsavefilename \"$1\" \"$2\"" ;;
             Xdialog)    DIALOG_TEXT="--title \"Select file\" --fselect \"$1/$2\" 0x0";;
             dialog)     DIALOG_TEXT="--title \"Select file\" --fselect \"$1/$2\" $rows $cols";;
+            zenity)     DIALOG_TEXT="--file-selection --save --confirm-overwrite --filename=\"$1\"/ --file-filter=\"$2\"" ;;
         esac
         shift ;; # }}}
 
@@ -304,6 +338,8 @@ Xdialog/kdialog/dialog" ;;
     kdialog)  DIALOG_RETURN_PRINT="$( eval "$DIALOG $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS" )";;
     gxmessage) DIALOG_RETURN_PRINT="$( eval "$DIALOG -wrap $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS -file $TMP_FILE" )";;
     xmessage) DIALOG_RETURN_PRINT="$( eval "$DIALOG $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS -file $TMP_FILE" )";;
+    zenity)  DIALOG_RETURN_PRINT="$( eval "$DIALOG $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS" )"
+        ;;
     esac
     DIALOG_RETURN_STATUS=$?
     # Fix for xmessage. It returns the button count. Since Cancel==1, we
@@ -311,6 +347,16 @@ Xdialog/kdialog/dialog" ;;
     [[ "${DIALOG##*/}" = "xmessage" && $DIALOG_RETURN_STATUS -gt 1 ]] && \
         DIALOG_RETURN_STATUS=0
     rm -f $TMP_FILE
+    if [[ $ZENITY_LIST -eq 1 ]]; then
+        local tmp="$DIALOG_RETURN_PRINT"
+        DIALOG_RETURN_PRINT=""
+        IFS="|"
+        for x in $tmp; do
+            DIALOG_RETURN_PRINT+="${ZENITY_TAGS["$x"]}/"
+        done
+        DIALOG_RETURN_PRINT="${DIALOG_RETURN_PRINT%/}"
+        unset IFS
+    fi
 }
 # }}}
 
@@ -327,6 +373,11 @@ if ! selectdialog; then
     die "No message display program found."
 fi
 #echo $DIALOG
+
+if [[ $DIALOG = *zenity ]]; then
+    # Declare a dictionary of tags.
+    declare -A ZENITY_TAGS
+fi
 
 # Workaround for kdialog, which does not recognize \n at times
 if [[ $DIALOG = "*kdialog" ]]; then
