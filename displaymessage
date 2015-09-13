@@ -21,6 +21,8 @@
         #-----------------------------------------------------------#
 
     ##++++++++++++++++++++++++    Changelog   +++++++++++++++++++++++++++##
+    # 08/10/2014    Implement text input box. Auto height for zenity.     #
+    #               Get rid of trailing spaces.                           #
     # 18/06/2012    Many bugfixes with zenity and cleanups.               #
     # 27/05/2012    Massive cleanup. Use arrays instead of dumb strings.  #
     # 25/05/2012    Add support for zenity.                               #
@@ -71,12 +73,15 @@ help() {
     --passive <txt> [<N sec>]                         Provide a passive box,
                         which closes after N secs. (default 10sec)
     --savefile <startdir> <filter>  Provide a file selection dialog
-                        ${bold}Not available for xmessage${normal}"
+                        ${bold}Not available for xmessage${normal}
+    --inputbox <txt>    Provide a text input box
+                        ${bold}Not available for xmessage$normal"
     echo
 }
 # }}}
 
 : ${DIALOG:="kdialog zenity Xdialog gxmessage xmessage"} # In order of preference
+ZENITY_HEIGHT=""
 #DIALOG=kdialog
 
 selectdialog() { # {{{
@@ -91,7 +96,16 @@ selectdialog() { # {{{
     fi
     for i in ${DIALOG}; do
         if which $i >& /dev/null; then
-            DIALOG="$( which $i )" && return 0
+            DIALOG="$( which $i )"
+            if [[ "${DIALOG##*/}" == "zenity" ]]; then
+                # Assume that xrandr is installed. Not going to take care
+                # of missing xrandr right now.
+                ZENITY_HEIGHT="$( xrandr | grep '*' )"
+                ZENITY_HEIGHT="${ZENITY_HEIGHT#*x}"
+                ZENITY_HEIGHT="${ZENITY_HEIGHT%%\ *}"
+                ZENITY_HEIGHT="$(( $ZENITY_HEIGHT * 80 / 100 ))"
+            fi
+            return 0
         fi
     done
     return 1
@@ -99,7 +113,7 @@ selectdialog() { # {{{
 # }}}
 
 # displaymsg:
-# Options: 
+# Options:
 #   --center        Center the window
 #   --title <title> Set the title of the window
 #   --yesno <txt>   Provide a Yes/No type of dialog
@@ -111,7 +125,8 @@ selectdialog() { # {{{
 #   --checklist <txt> <tag1 description1 status1> ... Provide a checklist
 #   --radiolist <txt> <tag1 description1 status> ... Provide a radiolist
 #   --passive <txt> [<N sec>]   Provide a passive box, which closes after N secs.
-#   --savefile <startdir> <filter>  Provide a file selection dialog 
+#   --savefile <startdir> <filter>  Provide a file selection dialog
+#   --inputbox "string above input box" Provide text input dialog
 displaymsg() {  # {{{
     local TMP_FILE=$( mktemp /tmp/${0##*/}.XXXX) || \
         die "Can not create temporary file"
@@ -179,7 +194,8 @@ displaymsg() {  # {{{
             kdialog)    DIALOG_TEXT+=("--menu" "$1") ;;
             Xdialog)    DIALOG_TEXT+=("--menu" "$1" "0x0") ;;
             zenity)     DIALOG_TEXT+=("--list" "--text" "$1"
-                                      "--column" "Choose an option")
+                                      "--column" "Choose an option"
+                                      "--height" $ZENITY_HEIGHT )
                         ZENITY_LIST=1 ;;
         esac
         shift
@@ -188,7 +204,7 @@ displaymsg() {  # {{{
                 *xmessage)  echo -e "$1: $2" >> $TMP_FILE
                             XMSG_BUTTONS+="\"$1\":$DIALOG_BUTTON_COUNT,"
                             ((DIALOG_BUTTON_COUNT++)) ;;
-                Xdialog)    DIALOG_BUTTONS+=("$1" "$2") 
+                Xdialog)    DIALOG_BUTTONS+=("$1" "$2")
                             ((DIALOG_BUTTON_COUNT++)) ;;
                 *dialog)    DIALOG_BUTTONS+=("$1" "$2") ;;
                 zenity)     DIALOG_BUTTONS+=("$2")
@@ -198,7 +214,7 @@ displaymsg() {  # {{{
             if echo "$3" | grep -q -s "^--"; then
                 shift
                 break
-            else 
+            else
                 shift
                 shift
             fi
@@ -224,7 +240,8 @@ Xdialog/kdialog/dialog" ;;
             kdialog)    DIALOG_TEXT+=("--checklist" "$1") ;;
             Xdialog)    DIALOG_TEXT+=("--checklist" "$1" "0x0") ;;
             zenity)     DIALOG_TEXT+=("--list" "--checklist" "--text" "$1"
-                            "--column" " " "--column" "Choose your options")
+                            "--column" " " "--column" "Choose your options"
+                            "--height" $ZENITY_HEIGHT )
                         ZENITY_LIST=1 ;;
         esac
         shift
@@ -269,7 +286,8 @@ Xdialog/kdialog/dialog" ;;
             kdialog)    DIALOG_TEXT+=("--radiolist" "$1") ;;
             Xdialog)    DIALOG_TEXT+=("--radiolist" "$1" "0x0") ;;
             zenity)     DIALOG_TEXT+=("--list" "--radiolist" "--text" "$1"
-                            "--column" " " "--column" "Choose your options")
+                            "--column" " " "--column" "Choose your options"
+                            "--height" $ZENITY_HEIGHT )
                         ZENITY_LIST=1 ;;
         esac
         shift
@@ -301,7 +319,7 @@ Xdialog/kdialog/dialog" ;;
                 shift
                 shift
             fi
-        done 
+        done
         case ${DIALOG##*\/} in
             *xmessage)  DIALOG_BUTTONS+=("${XMSG_BUTTONS}'Cancel':1"
                                 "-default" "$DEFAULT_CANCEL" "-print") ;;
@@ -359,12 +377,24 @@ Xdialog/kdialog/dialog" ;;
         esac
         shift ;; # }}}
 
+    --inputbox)  # for text input. Only zenity and kdialog for now.
+        shift
+        case ${DIALOG##*\/} in
+            xmessage)   displaymsg --error "Text input not available for xmessage!" ;;
+            gxmessage)  DIALOG_TEXT+=("-entry") ;;
+            dialog)     DIALOG_TEXT+=("--inputbox" "$1" $rows $cols) ;;
+            Xdialog)    DIALOG_TEXT+=("--inputbox" "$1" 0x0) ;;
+            kdialog)    DIALOG_TEXT+=("--inputbox" "$1") ;;
+            zenity)     DIALOG_TEXT+=("--entry" "--text" "$1") ;;
+         esac
+         shift ;;
+
     *)  rm -f $TMP_FILE
         die "$1: Not yet implemented" ;;
     esac
     shift
     done
-            
+
     # Show the dialog
     #info "$DIALOG $DIALOG_CENTER $DIALOG_TITLE $DIALOG_TEXT $DIALOG_BUTTONS"
     case ${DIALOG##*\/} in
